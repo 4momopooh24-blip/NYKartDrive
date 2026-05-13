@@ -1,0 +1,991 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>NY Kart Morning Drive</title>
+  <style>
+    body { margin: 0; overflow: hidden; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #e0f7fa; }
+    canvas { display: block; }
+
+    /* UIレイアウト */
+    #ui {
+      position: absolute; top: 20px; left: 20px; color: #006064; z-index: 10;
+      background: rgba(224, 247, 250, 0.8); padding: 15px; border-radius: 12px;
+      border: 2px solid #00acc1; box-shadow: 0 0 15px rgba(0,172,193,0.3);
+    }
+    #lap { font-size: 24px; font-weight: bold; margin-bottom: 5px; }
+    #speed { font-size: 18px; color: #000000; }
+
+    #countdown {
+      position: absolute; top: 50%; width: 100%; text-align: center;
+      font-size: 120px; color: #0277bd; transform: translateY(-50%);
+      z-index: 20; font-weight: bold; text-shadow: 0 0 20px #81d4fa;
+    }
+
+    #result {
+      position: absolute; top: 50%; width: 100%; text-align: center;
+      font-size: 80px; color: #00c853; transform: translateY(-50%);
+      z-index: 30; display: none; text-shadow: 0 0 30px #69f0ae;
+    }
+
+    #controls {
+      position: absolute; bottom: 20px; width: 100%; text-align: center;
+      color: #01579b; font-size: 18px; z-index: 10; text-shadow: 1px 1px 1px rgba(255,255,255,0.8);
+    }
+    #restartBtn {
+      position: absolute;
+      top: 20px;
+      right: 20px;
+      z-index: 50;
+      padding: 12px 24px;
+      font-size: 18px;
+      font-weight: bold;
+      background: rgba(224, 247, 250, 0.9);
+      color: #006064;
+      border: 2px solid #00acc1;
+      border-radius: 12px;
+      cursor: pointer;
+      box-shadow: 0 0 15px rgba(0,172,193,0.3);
+}
+    #restartBtn:hover {
+      background: #b2ebf2;
+}
+    #positionDisplay {
+      position: absolute;
+      right: 20px;
+      bottom: 20px;
+      z-index: 20;
+      background: rgba(224, 247, 250, 0.9);
+      padding: 15px 25px;
+      border-radius: 14px;
+      border: 2px solid #00acc1;
+      color: #006064;
+      font-size: 28px;
+      font-weight: bold;
+      box-shadow: 0 0 15px rgba(0,172,193,0.3);
+}
+#ranking {
+  position: absolute;
+  top: 140px; /* Lap表示の下に配置 */
+  left: 20px;
+  z-index: 15;
+  background: rgba(224, 247, 250, 0.9);
+  padding: 15px;
+  border-radius: 12px;
+  border: 2px solid #00acc1;
+  color: #006064;
+  font-size: 18px;
+  font-weight: bold;
+  box-shadow: 0 0 15px rgba(0,172,193,0.3);
+  min-width: 180px;
+}
+
+.rankItem {
+  display: flex;
+  align-items: center;
+  margin-top: 8px;
+  font-size: 16px;
+}
+
+.rankColor {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  margin-right: 10px;
+  border: 1px solid #333;
+}
+
+  </style>
+</head>
+<body>
+  <div id="result">GOAL!</div>
+  <button id="restartBtn">Restart</button>
+
+  <!-- スタート画面用オーバーレイ -->
+<div id="startOverlay" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); z-index: 100; display: flex; flex-direction: column; justify-content: center; align-items: center; color: white;">
+    <h1 style="font-size: 60px; margin-bottom: 20px; text-shadow: 0 0 20px #00acc1;">NY Kart Drive</h1>
+
+    <input id="playerName" type="text" placeholder="Enter your name"
+    style="padding: 12px; font-size: 24px; margin-bottom: 20px; border-radius: 10px; border: none; text-align: center;">
+
+    <button id="startBtn" style="padding: 20px 50px; font-size: 30px; cursor: pointer; background: #00acc1; color: white; border: none; border-radius: 50px; box-shadow: 0 5px 15px rgba(0,0,0,0.3);">START RACE</button>
+</div>
+
+<div id="ui">
+  <div id="lap">Lap: 1 / 2</div>
+  <div id="speed">Speed: 0 km/h</div>
+</div>
+
+<div id="countdown">3</div>
+<div id="result">GOAL!</div>
+<div id="controls">WASD / 矢印キー:操作 / <b>[Shift] 長押しでオート運転アシスト</b></div>
+
+<div id="positionDisplay">1st / 4</div>
+<div id="ranking">
+  <div><b>Ranking</b></div>
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+
+// --- グローバル変数 ---
+let scene, camera, renderer, playerCar;
+let cpuCars = [];
+let buildingObjects = [];
+let roadSegments = [];
+let dashPanels = [];
+let keys = {};
+let mouseX = 0;
+let raceStarted = false;
+let countdown = 3;
+let playerLap = 1;
+let raceFinished = false;
+let playerName = "Player";
+let raceStartTimestamp = 0;
+
+const totalLaps = 2;
+const trackWidth = 40;
+
+// チェックポイント座標（コースの形）
+const checkpoints = [
+    new THREE.Vector3(-700, 0, -650),
+    new THREE.Vector3(-500, 0, -650),
+    new THREE.Vector3(-300, 0, -650),
+
+    new THREE.Vector3(-300, 0, -400),
+    new THREE.Vector3(-300, 0, -150),
+
+    new THREE.Vector3(-100, 0, -150),
+    new THREE.Vector3(150, 0, -150),
+
+    new THREE.Vector3(150, 0, 100),
+    new THREE.Vector3(150, 0, 350),
+
+    new THREE.Vector3(-50, 0, 350),
+    new THREE.Vector3(-300, 0, 350),
+
+    new THREE.Vector3(-550, 0, 350),
+    new THREE.Vector3(-800, 0, 350),
+
+    new THREE.Vector3(-800, 0, 100),
+    new THREE.Vector3(-800, 0, -200),
+
+    new THREE.Vector3(-800, 0, -450),
+    new THREE.Vector3(-700, 0, -650)
+];
+
+init();
+   window.addEventListener("resize", onWindowResize);
+   document.getElementById("restartBtn").addEventListener("click", restartRace);
+
+animate();
+
+// スタートボタンのイベントリスナー
+document.getElementById("startBtn").addEventListener("click", () => {
+    const inputName = document.getElementById("playerName").value.trim();
+    playerName = inputName || "Player";
+
+    document.getElementById("startOverlay").style.display = "none";
+    startCountdown();
+});
+
+function init() {
+    // シーン作成と明け方の明るい設定
+    scene = new THREE.Scene();
+    scene.background = new THREE.Color(0xb3e5fc); // 爽やかな明け方の水色
+    // scene.fog = new THREE.FogExp2(0xffe0b2, 0.001); // ほのかな朝霧
+
+    camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 1, 5000);
+
+    renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    document.body.appendChild(renderer.domElement);
+
+    // ライティング（明るく）
+    const light = new THREE.HemisphereLight(0xffffff, 0xbbdefb, 1.5); // 空と地面からの光
+    scene.add(light);
+
+    const sunLight = new THREE.DirectionalLight(0xfff9c4, 1.0); // 朝日
+    sunLight.position.set(-100, 80, 50);
+    scene.add(sunLight);
+
+    // 各要素の作成
+    createTerrain();
+    createTrack();
+    createBuildings();
+    createPlayer();
+    createCPUCars();
+    createStartLine();
+    createDashPanels();
+    createGate();
+
+    // 入力イベント
+    document.addEventListener("keydown", e => { keys[e.code] = true; });
+    document.addEventListener("keyup", e => { keys[e.code] = false; });
+    window.addEventListener("resize", onWindowResize);
+}
+
+function createTerrain() {
+    const groundGeo = new THREE.PlaneGeometry(8000, 8000);
+    const groundMat = new THREE.MeshPhongMaterial({ color: 0x81c784 }); // 緑の地面
+    const ground = new THREE.Mesh(groundGeo, groundMat);
+    ground.rotation.x = -Math.PI / 2;
+    scene.add(ground);
+}
+
+function createRoadSegment(start, end) {
+    const dx = end.x - start.x;
+    const dz = end.z - start.z;
+    const length = Math.sqrt(dx * dx + dz * dz);
+
+    // 判定しやすくするために高さを少し出す(2)
+    const road = new THREE.Mesh(
+        new THREE.BoxGeometry(trackWidth, 2, length + 10), 
+        new THREE.MeshPhongMaterial({ color: 0x546e7a })
+    );
+
+    road.position.set((start.x + end.x) / 2, 0, (start.z + end.z) / 2);
+    road.rotation.y = Math.atan2(dx, dz);
+    scene.add(road);
+    roadSegments.push(road); 
+}
+
+function createTrack() {
+    for (let i = 0; i < checkpoints.length - 1; i++) {
+        createRoadSegment(checkpoints[i], checkpoints[i + 1]);
+    }
+}
+
+function createBuildings() {
+    const placedBuildings = [];
+
+    for (let i = 0; i < 700; i++) {
+        const w = 20 + Math.random() * 40;
+        const h = 50 + Math.random() * 350;
+        const d = 20 + Math.random() * 40;
+
+        const radius = Math.max(w, d) / 2 + 8;
+
+        let validPosition = false;
+        let x, z;
+        let attempts = 0;
+
+        while (!validPosition && attempts < 50) {
+            attempts++;
+
+            x = (Math.random() - 0.5) * 2200;
+            z = (Math.random() - 0.5) * 2200;
+
+            const buildingPos = new THREE.Vector3(x, 0, z);
+            validPosition = true;
+
+            // コースとの重なり防止
+            for (let road of roadSegments) {
+                const safeDistance = Math.max(trackWidth * 2.5, 120);
+                if (buildingPos.distanceTo(road.position) < safeDistance) {
+                    validPosition = false;
+                    break;
+                }
+            }
+
+            // チェックポイント付近も避ける
+            if (validPosition) {
+                for (let point of checkpoints) {
+                    if (buildingPos.distanceTo(point) < 100) {
+                        validPosition = false;
+                        break;
+                    }
+                }
+            }
+
+            // 他の建物との重なり防止
+            if (validPosition) {
+                for (let other of placedBuildings) {
+                    const dist = buildingPos.distanceTo(other.position);
+                    if (dist < radius + other.radius + 15) {
+                        validPosition = false;
+                        break;
+                    }
+                }
+            }
+        }
+
+        if (!validPosition) {
+            continue;
+        }
+
+        const buildingColor = new THREE.Color().setHSL(
+            Math.random(),
+            0.7,
+            0.5 + Math.random() * 0.2
+        );
+
+        const building = new THREE.Mesh(
+            new THREE.BoxGeometry(w, h, d),
+            new THREE.MeshPhongMaterial({
+                color: buildingColor,
+                shininess: 60
+            })
+        );
+
+        building.position.set(x, h / 2, z);
+        building.userData = { radius: radius };
+
+        scene.add(building);
+        buildingObjects.push(building);
+
+        placedBuildings.push({
+            position: new THREE.Vector3(x, 0, z),
+            radius: radius
+        });
+    }
+}
+
+function createCar(color) {
+    const carGroup = new THREE.Group();
+    
+    // ボディ
+    const body = new THREE.Mesh(
+        new THREE.BoxGeometry(12, 4, 22),
+        new THREE.MeshPhongMaterial({ color: color, shininess: 100 })
+    );
+    body.position.y = 4;
+    carGroup.add(body);
+
+    // キャビン（窓）
+    const cabin = new THREE.Mesh(
+        new THREE.BoxGeometry(10, 3, 10),
+        new THREE.MeshPhongMaterial({ color: 0x81d4fa, transparent: true, opacity: 0.6 }) // 明るい窓
+    );
+    cabin.position.set(0, 7, -2);
+    carGroup.add(cabin);
+
+    // タイヤ
+    const wheelGeo = new THREE.CylinderGeometry(2.5, 2.5, 2, 12);
+    const wheelMat = new THREE.MeshPhongMaterial({ color: 0x333333 });
+    const wheelPositions = [[-6, 2.5, 7], [6, 2.5, 7], [-6, 2.5, -7], [6, 2.5, -7]];
+    
+    carGroup.wheels = [];
+    wheelPositions.forEach(pos => {
+        const wheel = new THREE.Mesh(wheelGeo, wheelMat);
+        wheel.rotation.z = Math.PI / 2;
+        wheel.position.set(pos[0], pos[1], pos[2]);
+        carGroup.add(wheel);
+        carGroup.wheels.push(wheel);
+    });
+    // --- ヘッドライト ---
+    const headlightGeo = new THREE.BoxGeometry(2, 1.5, 1);
+    const headlightMat = new THREE.MeshBasicMaterial({ color: 0xfff9c4 });
+
+    const leftHeadlight = new THREE.Mesh(headlightGeo, headlightMat);
+    leftHeadlight.position.set(-3.5, 4, 11.5);
+    carGroup.add(leftHeadlight);
+
+    const rightHeadlight = new THREE.Mesh(headlightGeo, headlightMat);
+    rightHeadlight.position.set(3.5, 4, 11.5);
+    carGroup.add(rightHeadlight);
+
+    // --- ブレーキランプ ---
+    const brakeLightGeo = new THREE.BoxGeometry(2, 1.5, 1);
+    const brakeLightMat = new THREE.MeshBasicMaterial({ color: 0xff1744 });
+
+    const leftBrake = new THREE.Mesh(brakeLightGeo, brakeLightMat);
+    leftBrake.position.set(-3.5, 4, -11.5);
+    carGroup.add(leftBrake);
+
+    const rightBrake = new THREE.Mesh(brakeLightGeo, brakeLightMat);
+    rightBrake.position.set(3.5, 4, -11.5);
+    carGroup.add(rightBrake);
+    return carGroup;
+}
+
+function createPlayer() {
+    playerCar = createCar(0xffeb3b); // イエロー
+    playerCar.position.copy(checkpoints[0]);
+    playerCar.position.y = 0;
+    playerCar.rotation.y = Math.PI / 2;
+    playerCar.speed = 0;
+    playerCar.currentCheckpoint = 1;
+    scene.add(playerCar);
+}
+
+function createCPUCars() {
+    const colors = [0xf44336, 0x2196f3, 0x4caf50];
+
+    for (let i = 0; i < 3; i++) {
+        const cpu = createCar(colors[i]);
+        cpu.position.copy(checkpoints[0]);
+        cpu.position.x += (i + 1) * 12;
+        // スピードを半分（0.35 〜 0.55 くらい）に変更
+        cpu.speed = 0.35 + Math.random() * 0.2; 
+        cpu.currentCheckpoint = 1;
+        cpu.currentLap = 1;
+
+        cpuCars.push(cpu);
+        scene.add(cpu);
+    }
+}
+
+function createStartLine() {
+    const line = new THREE.Mesh(
+        new THREE.BoxGeometry(trackWidth, 0.5, 10),
+        new THREE.MeshPhongMaterial({ color: 0xffffff })
+    );
+    line.position.copy(checkpoints[0]);
+    line.position.y = 0.6;
+    scene.add(line);
+}
+
+function updatePlayer() {
+    if (!raceStarted || raceFinished) return;
+
+    // --- 1. 改良版・コース判定（レイキャスト + 角の補完） ---
+    
+    // 車の真下だけでなく、少し前方と左右もチェック（角での判定漏れ防止）
+    const checkPoints = [
+        new THREE.Vector3(playerCar.position.x, 10, playerCar.position.z), // 足元
+        new THREE.Vector3(playerCar.position.x + Math.sin(playerCar.rotation.y) * 5, 10, playerCar.position.z + Math.cos(playerCar.rotation.y) * 5) // 少し前
+    ];
+
+    let isOnRoad = false;
+    for (let cp of checkPoints) {
+        const raycaster = new THREE.Raycaster(cp, new THREE.Vector3(0, -1, 0));
+        const intersects = raycaster.intersectObjects(roadSegments);
+        if (intersects.length > 0) {
+            isOnRoad = true;
+            break;
+        }
+    }
+
+    let maxSpd = 4.8;
+    const timeSinceStart = Date.now() - (window.raceStartTime || 0);
+
+    if (isOnRoad) {
+        // 【コース内】
+        maxSpd = 4.8;
+    } else {
+        // 道路がない場合、各パーツの「中心」だけでなく「端（角）」を考慮した距離判定
+        let minDist = 9999;
+        roadSegments.forEach(r => {
+            const d = playerCar.position.distanceTo(r.position);
+            if (d < minDist) minDist = d;
+        });
+
+        // 判定基準：道路の幅(40)の半分(20) + 車3台分(約45) ＝ 約65〜70
+        // ここを少し広めの 85 に設定して、曲がり角での猶予を増やします
+        if (minDist < 85) { 
+            // 【減速エリア】ガタガタ揺れる
+            maxSpd = 1.2;
+            playerCar.position.y = Math.sin(Date.now() * 0.05) * 0.4;
+        } else {
+            // 【ゲームオーバー】完全に外
+            // スタート直後の無敵時間（3秒）と、極低速時は死なない
+            if (!raceFinished && Math.abs(playerCar.speed) > 0.5 && timeSinceStart > 3000) {
+                gameOver();
+                return;
+            }
+        }
+    }
+
+    // --- 2. 操作ロジック ---
+    if (keys["ShiftLeft"] || keys["ShiftRight"]) {
+        const target = checkpoints[playerCar.currentCheckpoint];
+        const angleToTarget = Math.atan2(target.x - playerCar.position.x, target.z - playerCar.position.z);
+        let diff = angleToTarget - playerCar.rotation.y;
+        while (diff < -Math.PI) diff += Math.PI * 2;
+        while (diff > Math.PI) diff -= Math.PI * 2;
+        playerCar.rotation.y += diff * 0.08;
+        playerCar.speed += 0.06;
+    } else {
+        if (keys["KeyW"] || keys["ArrowUp"]) playerCar.speed += 0.08;
+        if (keys["KeyS"] || keys["ArrowDown"]) playerCar.speed -= 0.05;
+        if (keys["KeyA"] || keys["ArrowLeft"]) playerCar.rotation.y += 0.0075 * (playerCar.speed >= 0 ? 1 : -1);
+        if (keys["KeyD"] || keys["ArrowRight"]) playerCar.rotation.y -= 0.0075 * (playerCar.speed >= 0 ? 1 : -1);
+    }
+
+    playerCar.speed *= 0.96;
+    playerCar.speed = Math.max(-1.8, Math.min(maxSpd, playerCar.speed));
+
+    playerCar.position.x += Math.sin(playerCar.rotation.y) * playerCar.speed;
+    playerCar.position.z += Math.cos(playerCar.rotation.y) * playerCar.speed;
+
+    // --- 3. ダッシュパネル・建物・チェックポイント判定（既存のまま） ---
+    dashPanels.forEach(panel => {
+        if (playerCar.position.distanceTo(panel.position) < 25) {
+            playerCar.speed += 0.3;
+            if (playerCar.speed > 8.5) playerCar.speed = 8.5; 
+            panel.material.emissive.setHex(0xffffff);
+        } else {
+            panel.material.emissive.setHex(0x00ffff);
+        }
+    });
+    
+    buildingObjects.forEach(b => {
+        const dist = playerCar.position.distanceTo(b.position);
+        if (dist < b.userData.radius) {
+            const pushDir = new THREE.Vector3().subVectors(playerCar.position, b.position).normalize();
+            playerCar.speed *= -1.2; 
+            playerCar.position.add(pushDir.multiplyScalar(5));
+        }
+    });
+
+    playerCar.wheels.forEach(w => { w.rotation.x += playerCar.speed * 0.2; });
+
+    const target = checkpoints[playerCar.currentCheckpoint];
+    if (playerCar.position.distanceTo(target) < 70) {
+        playerCar.currentCheckpoint = (playerCar.currentCheckpoint + 1) % checkpoints.length;
+        if (playerCar.currentCheckpoint === 0) {
+            playerLap++;
+            document.getElementById("lap").innerText = `Lap: ${Math.min(playerLap, 2)} / 2`;
+            if (playerLap > totalLaps) finishRace();
+        }
+    }
+
+    document.getElementById("speed").innerText = `Speed: ${Math.floor(Math.abs(playerCar.speed) * 40)} km/h`;
+
+    const camDist = 65, camHeight = 25;
+    const camAngle = playerCar.rotation.y + mouseX;
+    camera.position.set(
+        playerCar.position.x - Math.sin(camAngle) * camDist,
+        playerCar.position.y + camHeight,
+        playerCar.position.z - Math.cos(camAngle) * camDist
+    );
+    camera.lookAt(playerCar.position);
+}
+
+function updateCPU() {
+    if (!raceStarted || raceFinished) return;
+
+    cpuCars.forEach(cpu => {
+        const target = checkpoints[cpu.currentCheckpoint];
+        const dir = new THREE.Vector3()
+            .subVectors(target, cpu.position)
+            .normalize();
+
+        cpu.rotation.y = Math.atan2(dir.x, dir.z);
+        cpu.position.add(dir.multiplyScalar(cpu.speed));
+
+        cpu.wheels.forEach(w => {
+            w.rotation.x += cpu.speed * 0.2;
+        });
+
+    if (cpu.position.distanceTo(target) < 40) {
+        cpu.currentCheckpoint = (cpu.currentCheckpoint + 1) % checkpoints.length;
+
+    if (cpu.currentCheckpoint === 0) {
+        cpu.currentLap++;
+    }
+}
+    });
+}
+
+function updatePositionDisplay() {
+    const cars = [
+        {
+            isPlayer: true,
+            progress: playerLap * checkpoints.length + playerCar.currentCheckpoint
+        },
+        ...cpuCars.map(cpu => ({
+            isPlayer: false,
+            progress: cpu.currentLap * checkpoints.length + cpu.currentCheckpoint
+        }))
+    ];
+
+    cars.sort((a, b) => b.progress - a.progress);
+
+    const playerRank = cars.findIndex(car => car.isPlayer) + 1;
+
+    let suffix = "th";
+    if (playerRank === 1) suffix = "st";
+    else if (playerRank === 2) suffix = "nd";
+    else if (playerRank === 3) suffix = "rd";
+
+    document.getElementById("positionDisplay").innerText =
+        `${playerRank}${suffix} / ${cars.length}`;
+}
+
+function finishRace() {
+    raceFinished = true;
+
+    const finishTime = ((Date.now() - raceStartTimestamp) / 1000).toFixed(2);
+
+    saveRanking(playerName, finishTime);
+
+    const res = document.getElementById("result");
+    res.innerText = `GOAL! ${finishTime}s`;
+    res.style.display = "block";
+
+    showLeaderboard();
+}
+
+function restartRace() {
+    // プレイヤー初期化
+    playerCar.position.copy(checkpoints[0]);
+    playerCar.position.y = 0;
+    playerCar.rotation.y = Math.PI / 2;
+    playerCar.speed = 0;
+    playerCar.currentCheckpoint = 1;
+
+    // CPU初期化
+    cpuCars.forEach((cpu, i) => {
+        cpu.position.copy(checkpoints[0]);
+        cpu.position.x += (i + 1) * 12;
+        cpu.position.y = 0;
+        cpu.rotation.y = playerCar.rotation.y;
+        cpu.currentCheckpoint = 1;
+        cpu.currentLap = 1;
+    });
+
+    // 状態リセット
+    playerLap = 1;
+    raceFinished = false;
+    raceStarted = false;
+    countdown = 3;
+    mouseX = 0;
+    playerName = "Player";
+
+    // UIリセット
+    document.getElementById("lap").innerText = `Lap: 1 / ${totalLaps}`;
+    document.getElementById("speed").innerText = `Speed: 0 km/h`;
+
+    // Resultリセット
+    const resultEl = document.getElementById("result");
+    resultEl.style.display = "none";
+    resultEl.innerText = "GOAL!";
+    resultEl.style.color = "#00c853";
+
+    // Countdownリセット
+    const countdownEl = document.getElementById("countdown");
+    countdownEl.style.display = "block";
+    countdownEl.innerText = "3";
+
+    // ランキング非表示
+    document.getElementById("leaderboard").style.display = "none";
+
+    // 名前欄リセット
+    document.getElementById("playerName").value = "";
+
+    // スタート画面再表示
+    document.getElementById("startOverlay").style.display = "flex";
+}
+
+function startCountdown() {
+    const el = document.getElementById("countdown");
+    const countdownSound = document.getElementById("countdownSound");
+
+    // 1. 最初は「3」を表示して待機（音はまだ鳴らさない）
+    el.style.display = "block";
+    countdown = 3; 
+    el.innerText = countdown;
+
+    // 2. 1秒ごとに実行されるタイマーを開始
+    const timer = setInterval(() => {
+        // カメラ制御（既存のコードと同じ）
+        const camDist = 65;
+        const camHeight = 25;
+        camera.position.set(
+            playerCar.position.x - Math.sin(playerCar.rotation.y) * camDist,
+            playerCar.position.y + camHeight,
+            playerCar.position.z - Math.cos(playerCar.rotation.y) * camDist
+        );
+        camera.lookAt(playerCar.position);
+
+        // --- 音と数字の更新ロジック ---
+
+        if (countdown > 0) {
+            // ★【重要】ここで音を鳴らす（1秒経過するごとに鳴る）
+            if (countdownSound) {
+                countdownSound.currentTime = 0;
+                countdownSound.play().catch(e => console.log("Audio play failed", e));
+            }
+            
+            // 音が鳴った瞬間に、画面の数字を次のカウントへ（3→2、2→1）
+            el.innerText = countdown;
+            countdown--; 
+        } else if (countdown === 0) {
+            // カウントが0になったら「GO!」
+            el.innerText = "GO!";
+            raceStarted = true;
+            window.raceStartTime = Date.now();
+            raceStartTimestamp = Date.now();
+            
+            // 「GO!」の時もピッ！と音を鳴らしたい場合は以下の2行を有効にしてください
+            // countdownSound.currentTime = 0;
+            // countdownSound.play();
+
+            countdown--;
+        } else {
+            // すべて終了したら非表示にしてタイマー停止
+            el.style.display = "none";
+            clearInterval(timer);
+        }
+    }, 1000); // 1秒間隔
+}
+
+function animate() {
+    requestAnimationFrame(animate);
+
+    const time = Date.now() * 0.005;
+    dashPanels.forEach((panel, i) => {
+        // 時間経過で色(HSL)を変化させる
+        const hue = (time + i * 0.5) % 1; 
+        panel.material.emissive.setHSL(hue, 1, 0.5);
+        // 少し浮き沈みさせて目立たせる
+        panel.position.y = 1.0 + Math.sin(time * 2) * 0.2;
+    });
+
+    updatePlayer();
+    updateCPU();
+    updateRanking();
+    updatePositionDisplay();
+    renderer.render(scene, camera);
+}
+
+function updateRanking() {
+    const cars = [
+        {
+            name: "YOU",
+            color: "#ffeb3b",
+            progress: playerLap * checkpoints.length + playerCar.currentCheckpoint
+        },
+        ...cpuCars.map((cpu, i) => ({
+            name: `CPU ${i + 1}`,
+            color: ["#f44336", "#2196f3", "#4caf50"][i],
+            progress: cpu.currentLap * checkpoints.length + cpu.currentCheckpoint
+        }))
+    ];
+
+    cars.sort((a, b) => b.progress - a.progress);
+
+    const rankingEl = document.getElementById("ranking");
+    if (!rankingEl) return;
+
+    rankingEl.innerHTML = "<div><b>Ranking</b></div>";
+
+    cars.forEach((car, index) => {
+        rankingEl.innerHTML += `
+            <div class="rankItem">
+                <div class="rankColor" style="background:${car.color};"></div>
+                ${index + 1}. ${car.name}
+            </div>
+        `;
+    });
+}
+
+function createDashPanels() {
+    const sections = [
+        { start: 1, end: 2 },
+        { start: 11, end: 12 }
+    ];
+
+    sections.forEach(sec => {
+        const p1 = checkpoints[sec.start];
+        const p2 = checkpoints[sec.end];
+
+        // --- 位置の計算（posX, posZ に変更） ---
+        const ratio = 0.2; 
+        const posX = p1.x + (p2.x - p1.x) * ratio;
+        const posZ = p1.z + (p2.z - p1.z) * ratio;
+
+        const geo = new THREE.PlaneGeometry(40, 20);
+        const mat = new THREE.MeshPhongMaterial({ 
+            color: 0xffffff,
+            emissive: 0xff00ff,
+            transparent: true, 
+            opacity: 0.9,
+            side: THREE.DoubleSide 
+        });
+        
+        const panel = new THREE.Mesh(geo, mat);
+        panel.rotation.x = -Math.PI / 2;
+        panel.rotation.z = Math.atan2(p2.x - p1.x, p2.z - p1.z);
+        
+        // ここが midX になっていたのを posX, posZ に修正
+        panel.position.set(posX, 1.0, posZ); 
+
+        scene.add(panel);
+        dashPanels.push(panel);
+    });
+}
+
+function onWindowResize() {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+}
+
+const countdownSound = document.getElementById("countdownSound");
+
+function playCountdown() {
+  countdownSound.currentTime = 0; // 途中再生対策
+  countdownSound.play();
+}
+
+function createGate() {
+    const gateGroup = new THREE.Group();
+    const pos = checkpoints[0]; // スタート地点
+
+    // --- 柱の作成 (アール・デコ調の段々デザイン) ---
+    const columnGeo = new THREE.BoxGeometry(8, 60, 8);
+    const columnMat = new THREE.MeshPhongMaterial({ color: 0x37474f, shininess: 100 });
+    
+    const leftColumn = new THREE.Mesh(columnGeo, columnMat);
+    leftColumn.position.set(-25, 30, 0); // 左側
+
+    const rightColumn = new THREE.Mesh(columnGeo, columnMat);
+    rightColumn.position.set(25, 30, 0); // 右側
+    
+    // --- 横長の看板看板部分 ---
+    const boardGeo = new THREE.BoxGeometry(60, 15, 4);
+    const boardMat = new THREE.MeshPhongMaterial({ color: 0x263238 });
+    const board = new THREE.Mesh(boardGeo, boardMat);
+    board.position.set(0, 50, 0);
+
+    // --- ネオンサイン (START / FINISH風の光るライン) ---
+    const neonGeo = new THREE.BoxGeometry(50, 1, 1);
+    const neonMat = new THREE.MeshBasicMaterial({ color: 0x00ffff });
+    
+    const neonTop = new THREE.Mesh(neonGeo, neonMat);
+    neonTop.position.set(0, 55, 2.1);
+    const neonBottom = new THREE.Mesh(neonGeo, neonMat);
+    neonBottom.position.set(0, 45, 2.1);
+
+    // --- チェッカーフラッグの装飾 (左右の柱に) ---
+    const flagGeo = new THREE.PlaneGeometry(10, 10);
+    const flagMat = new THREE.MeshBasicMaterial({ 
+        color: 0xffffff,
+        side: THREE.DoubleSide,
+        map: createCheckerTexture() // 簡易テクスチャ作成関数
+    });
+    const flagL = new THREE.Mesh(flagGeo, flagMat);
+    flagL.position.set(-30, 40, 5);
+    flagL.rotation.y = 0.5;
+
+    const flagR = new THREE.Mesh(flagGeo, flagMat);
+    flagR.position.set(30, 40, 5);
+    flagR.rotation.y = -0.5;
+
+    gateGroup.add(leftColumn, rightColumn, board, neonTop, neonBottom, flagL, flagR);
+
+    // ゲートを道路の向きに合わせる
+    gateGroup.position.copy(pos);
+    gateGroup.rotation.y = Math.PI / 2; // コースに合わせて調整
+
+    const nextPoint = checkpoints[1];
+    gateGroup.rotation.y = Math.atan2(nextPoint.x - pos.x, nextPoint.z - pos.z);
+
+    scene.add(gateGroup);
+}
+
+// チェッカーフラッグの模様をプログラムで作成
+function createCheckerTexture() {
+    const size = 128;
+    const canvas = document.createElement('canvas');
+    canvas.width = size;
+    canvas.height = size;
+    const ctx = canvas.getContext('2d');
+    
+    ctx.fillStyle = "black";
+    ctx.fillRect(0, 0, size, size);
+    ctx.fillStyle = "white";
+    for(let i=0; i<4; i++){
+        for(let j=0; j<4; j++){
+            if((i+j)%2 === 0) ctx.fillRect(i*32, j*32, 32, 32);
+        }
+    }
+    const texture = new THREE.CanvasTexture(canvas);
+    return texture;
+}
+
+function gameOver() {
+    raceFinished = true; // 動きを止める
+    playerCar.speed = 0;
+
+    // UIの表示
+    const res = document.getElementById("result");
+    res.innerText = "OUT OF COURSE!";
+    res.style.color = "#ff1744"; // 赤色
+    res.style.display = "block";
+
+    // 2秒後にリスタート
+    setTimeout(() => {
+        res.innerText = "GOAL!"; // 元に戻す
+        res.style.color = "#00c853";
+        restartRace();
+    }, 2000);
+}
+
+function saveRanking(name, time) {
+    let rankings = JSON.parse(localStorage.getItem("kartRankings")) || [];
+
+    rankings.push({
+        name: name,
+        time: parseFloat(time)
+    });
+
+    rankings.sort((a, b) => a.time - b.time);
+
+    rankings = rankings.slice(0, 5);
+
+    localStorage.setItem("kartRankings", JSON.stringify(rankings));
+}
+
+function showLeaderboard() {
+    const leaderboard = document.getElementById("leaderboard");
+    const list = document.getElementById("leaderboardList");
+
+    let rankings = JSON.parse(localStorage.getItem("kartRankings")) || [];
+
+    list.innerHTML = rankings.map((entry, index) =>
+        `<div style="margin:8px 0; font-size:22px;">
+            ${index + 1}. ${entry.name} - ${entry.time.toFixed(2)}s
+        </div>`
+    ).join("");
+
+    leaderboard.style.display = "block";
+}
+
+window.closeLeaderboard = function() {
+    document.getElementById("leaderboard").style.display = "none";
+    restartRace();
+};
+
+</script>
+
+<audio id="countdownSound" src="sounds/countdown.mp3"></audio>
+
+<div id="leaderboard" style="
+position:absolute;
+top:50%;
+left:50%;
+transform:translate(-50%,-50%);
+background:rgba(0,0,0,0.85);
+color:white;
+padding:30px;
+border-radius:20px;
+z-index:200;
+display:none;
+text-align:center;
+min-width:350px;
+">
+    <h2>TOP 5 RANKING</h2>
+    <div id="leaderboardList"></div>
+    <button onclick="closeLeaderboard()" style="
+    margin-top:20px;
+    padding:10px 20px;
+    font-size:18px;
+    cursor:pointer;
+    ">Close</button>
+</div>
+
+</body>
+</html>
